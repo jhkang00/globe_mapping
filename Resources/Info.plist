@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Document Types -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Globe Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.globeeditor.globe</string>
+            </array>
+        </dict>
+    </array>
+    
+    <!-- Exported Type Declarations -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.globeeditor.globe</string>
+            <key>UTTypeDescription</key>
+            <string>Globe World Map</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+                <string>public.content</string>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>globe</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/x-globe</string>
+            </dict>
+        </dict>
+    </array>
+    
+    <!-- iCloud Document Support (optional) -->
+    <key>NSUbiquitousContainers</key>
+    <dict>
+        <key>iCloud.com.globeeditor.GlobeEditor</key>
+        <dict>
+            <key>NSUbiquitousContainerIsDocumentScopePublic</key>
+            <true/>
+            <key>NSUbiquitousContainerName</key>
+            <string>Globe Editor</string>
+            <key>NSUbiquitousContainerSupportedFolderLevels</key>
+            <string>Any</string>
+        </dict>
+    </dict>
+    
+    <!-- Required for Files app access on iOS -->
+    <key>UISupportsDocumentBrowser</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+</dict>
+</plist>
