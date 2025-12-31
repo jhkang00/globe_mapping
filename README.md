@@ -184,8 +184,8 @@ JSON document with compact coordinate encoding:
 python Tools/svg_to_globe.py \
     --inner InnerWorld.svg \
     --outer OuterWorld.svg \
-    --name "Gwanic Ocean" \
-    -o gwanic.globe
+    --name "Suric Ocean" \
+    -o suric.globe
 ```
 
 The converter:
