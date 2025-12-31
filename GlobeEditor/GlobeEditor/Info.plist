@@ -9,31 +9,38 @@
 			<string>Editor</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.example.plain-text</string>
+				<string>com.globeeditor.globe</string>
 			</array>
 			<key>NSUbiquitousDocumentUserActivityType</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER).exampledocument</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).globe</string>
 		</dict>
 	</array>
-	<key>UTImportedTypeDeclarations</key>
+	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.globeeditor.globe</string>
+			<key>UTTypeDescription</key>
+			<string>Globe World Map</string>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.plain-text</string>
+				<string>public.json</string>
+				<string>public.data</string>
 			</array>
-			<key>UTTypeDescription</key>
-			<string>Example Text</string>
-			<key>UTTypeIdentifier</key>
-			<string>com.example.plain-text</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-					<string>exampletext</string>
+					<string>globe</string>
 				</array>
 			</dict>
 		</dict>
 	</array>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>GlobeEditor needs access to open and save globe map files.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>GlobeEditor needs access to open and save globe map files.</string>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 </dict>
 </plist>
