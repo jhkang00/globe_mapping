@@ -19,6 +19,10 @@ from typing import List, Tuple, Dict, Any, Optional
 import xml.etree.ElementTree as ET
 from uuid import uuid4
 
+# Default output to iCloud Drive for automatic iPad sync
+ICLOUD_DRIVE = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs"
+DEFAULT_OUTPUT = ICLOUD_DRIVE / "world.globe"
+
 # Coordinate system constants
 SVG_WIDTH = 4170.0
 SVG_HEIGHT = 1668.0
@@ -249,7 +253,87 @@ def process_svg_to_paths(svg_paths: List[str], shift: float) -> List[Dict[str, A
     return result_paths
 
 
-def create_globe_document(inner_svg: str = None, outer_svg: str = None, name: str = "Converted World") -> Dict[str, Any]:
+def generate_grid_layer(minor_interval: float = 15.0, major_interval: float = 30.0,
+                        segments_per_line: int = 72) -> Dict[str, Any]:
+    """Generate a grid layer with latitude and longitude lines.
+
+    - Minor lines (15°): subtle blue-gray
+    - Major lines (30°): yellow
+    - Equator (0°): red
+    """
+    paths = []
+
+    # Minor grid style: subtle blue-gray
+    minor_style = {
+        "strokeColor": {"r": 0.4, "g": 0.5, "b": 0.6, "a": 0.3},
+        "strokeWidth": 0.4
+    }
+
+    # Major grid style: yellow
+    major_style = {
+        "strokeColor": {"r": 0.8, "g": 0.7, "b": 0.2, "a": 0.6},
+        "strokeWidth": 0.7
+    }
+
+    # Equator style: red
+    equator_style = {
+        "strokeColor": {"r": 0.8, "g": 0.2, "b": 0.2, "a": 0.7},
+        "strokeWidth": 1.0
+    }
+
+    def get_lat_style(lat: int) -> dict:
+        if lat == 0:
+            return equator_style
+        elif lat % int(major_interval) == 0:
+            return major_style
+        return minor_style
+
+    def get_lon_style(lon: int) -> dict:
+        if lon % int(major_interval) == 0:
+            return major_style
+        return minor_style
+
+    # Latitude lines (parallels) - every 15° from -75 to +75
+    for lat in range(-75, 76, int(minor_interval)):
+        points = []
+        for i in range(segments_per_line + 1):
+            lon = -180 + (360 * i / segments_per_line)
+            points.append([float(lat), round(lon, 4)])
+
+        paths.append({
+            "id": str(uuid4()),
+            "pathType": "linear",
+            "linearPoints": points,
+            "isClosed": True,
+            "style": get_lat_style(lat)
+        })
+
+    # Longitude lines (meridians) - every 15°, capped at ±75° latitude
+    for lon in range(-180, 180, int(minor_interval)):
+        points = []
+        for i in range(segments_per_line + 1):
+            lat = -75 + (150 * i / segments_per_line)
+            points.append([round(lat, 4), float(lon)])
+
+        paths.append({
+            "id": str(uuid4()),
+            "pathType": "linear",
+            "linearPoints": points,
+            "isClosed": False,
+            "style": get_lon_style(lon)
+        })
+
+    return {
+        "id": str(uuid4()),
+        "name": "Grid",
+        "isVisible": True,
+        "isLocked": True,  # Lock to prevent accidental edits
+        "paths": paths
+    }
+
+
+def create_globe_document(inner_svg: str = None, outer_svg: str = None, name: str = "Converted World",
+                          include_grid: bool = True) -> Dict[str, Any]:
     """Create a .globe document from SVG files."""
     all_paths = []
     total_curves = 0
@@ -276,6 +360,24 @@ def create_globe_document(inner_svg: str = None, outer_svg: str = None, name: st
     
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     
+    # Build layers list
+    layers = []
+
+    # Grid layer first (renders behind coastlines)
+    if include_grid:
+        grid_layer = generate_grid_layer()
+        layers.append(grid_layer)
+        print(f"Generated grid layer with {len(grid_layer['paths'])} lines")
+
+    # Coastlines layer
+    layers.append({
+        "id": str(uuid4()),
+        "name": "Coastlines",
+        "isVisible": True,
+        "isLocked": False,
+        "paths": all_paths
+    })
+
     document = {
         "formatVersion": "2.0",
         "meta": {
@@ -283,17 +385,9 @@ def create_globe_document(inner_svg: str = None, outer_svg: str = None, name: st
             "created": now,
             "modified": now
         },
-        "layers": [
-            {
-                "id": str(uuid4()),
-                "name": "Coastlines",
-                "isVisible": True,
-                "isLocked": False,
-                "paths": all_paths
-            }
-        ]
+        "layers": layers
     }
-    
+
     print(f"\nTotal: {len(all_paths)} paths, {total_curves} Bézier curves")
     
     return document
@@ -304,10 +398,12 @@ def main():
         description="Convert Mercator SVG to .globe format (preserves Bézier curves)"
     )
     parser.add_argument("svg_files", nargs="*", help="SVG files to convert")
-    parser.add_argument("-o", "--output", default="world.globe", help="Output .globe file")
+    parser.add_argument("-o", "--output", default=None,
+                        help="Output .globe file (default: iCloud Drive/<name>.globe)")
     parser.add_argument("-n", "--name", default="Converted World", help="World name")
     parser.add_argument("--inner", help="InnerWorld SVG (eastern hemisphere)")
     parser.add_argument("--outer", help="OuterWorld SVG (western hemisphere)")
+    parser.add_argument("--no-grid", action="store_true", help="Exclude grid layer")
     
     args = parser.parse_args()
     
@@ -327,10 +423,14 @@ def main():
     if not inner_svg and not outer_svg:
         print("No SVG files specified. Use --inner and/or --outer, or provide file paths.")
         return
-    
-    document = create_globe_document(inner_svg, outer_svg, args.name)
-    
-    output_path = Path(args.output)
+
+    document = create_globe_document(inner_svg, outer_svg, args.name, include_grid=not args.no_grid)
+
+    # Default output: iCloud Drive with name-based filename
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        output_path = ICLOUD_DRIVE / f"{args.name}.globe"
     with open(output_path, 'w') as f:
         json.dump(document, f, separators=(',', ':'))
     

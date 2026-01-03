@@ -146,18 +146,14 @@ class PencilHoverView: UIView {
         let location = recognizer.location(in: self)
         
         var altitude: CGFloat = 0
-        var roll: CGFloat = 0
-        
+
         if #available(iOS 16.1, *) {
             altitude = recognizer.zOffset
         }
-        
-        // Roll angle requires Apple Pencil Pro
-        if #available(iOS 17.5, *) {
-            // rollAngle available on Apple Pencil Pro
-            // Note: This requires runtime check for pencil type
-        }
-        
+
+        // Roll angle requires Apple Pencil Pro (reserved for future use)
+        let roll: CGFloat = 0
+
         switch recognizer.state {
         case .began, .changed:
             onHover?(location, altitude, roll)

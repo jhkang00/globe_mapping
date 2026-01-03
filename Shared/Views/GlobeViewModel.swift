@@ -63,7 +63,10 @@ final class GlobeViewModel: ObservableObject {
     
     @Published var toolMode: ToolMode = .navigate {
         didSet {
-            if toolMode != .select { selection = nil }
+            if toolMode != .select {
+                selection = nil
+                updateRenderer()
+            }
             if toolMode != .erase { renderer?.eraserPosition = nil }
         }
     }

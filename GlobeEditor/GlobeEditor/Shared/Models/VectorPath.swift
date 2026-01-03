@@ -229,13 +229,13 @@ struct VectorPath: Identifiable, Codable, Equatable, Sendable {
 // MARK: - Vector Layer
 
 /// A layer containing vector features
-struct VectorLayer: Identifiable, Codable, Equatable, Sendable {
+struct VectorLayer: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
     var isVisible: Bool
     var isLocked: Bool
     var paths: [VectorPath]
-    
+
     init(id: UUID = UUID(), name: String, paths: [VectorPath] = []) {
         self.id = id
         self.name = name
@@ -243,4 +243,15 @@ struct VectorLayer: Identifiable, Codable, Equatable, Sendable {
         self.isLocked = false
         self.paths = paths
     }
+
+    // Explicit nonisolated Equatable conformance for Swift 6 compatibility
+    nonisolated static func == (lhs: VectorLayer, rhs: VectorLayer) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.name == rhs.name &&
+        lhs.isVisible == rhs.isVisible &&
+        lhs.isLocked == rhs.isLocked &&
+        lhs.paths == rhs.paths
+    }
 }
+
+extension VectorLayer: Equatable {}

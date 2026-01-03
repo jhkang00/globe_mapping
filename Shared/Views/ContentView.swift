@@ -290,17 +290,35 @@ struct ContentView: View {
     // MARK: - Layer Panel
     
     private var layerPanel: some View {
-        HStack {
+        HStack(spacing: 0) {
             Spacer()
-            
+
+            // Drawer handle on the left edge
+            Button {
+                withAnimation(.spring(response: 0.3)) {
+                    showLayerPanel = false
+                }
+            } label: {
+                VStack {
+                    Spacer()
+                    Image(systemName: "chevron.compact.right")
+                        .font(.title)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 20, height: 60)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+
             VStack(alignment: .leading, spacing: 0) {
                 // Header
                 HStack {
                     Text("Layers")
                         .font(.headline)
-                    
+
                     Spacer()
-                    
+
                     Button {
                         viewModel.addLayer(name: "Layer \(viewModel.document.layers.count + 1)")
                     } label: {
@@ -308,9 +326,9 @@ struct ContentView: View {
                     }
                 }
                 .padding()
-                
+
                 Divider()
-                
+
                 // Layer list
                 ScrollView {
                     VStack(spacing: 4) {
@@ -325,7 +343,8 @@ struct ContentView: View {
             .frame(width: 260)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding()
+            .padding(.vertical)
+            .padding(.trailing)
         }
         .transition(.move(edge: .trailing))
     }
@@ -340,18 +359,37 @@ struct ContentView: View {
                     .foregroundStyle(layer.isVisible ? .primary : .secondary)
             }
             .buttonStyle(.plain)
-            
+
+            // Lock indicator
+            if layer.isLocked {
+                Image(systemName: "lock.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             // Name
             Text(layer.name)
                 .lineLimit(1)
-            
+
             Spacer()
-            
+
             // Path count
             Text("\(layer.paths.count)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            
+
+            // Delete button (only if more than 1 layer)
+            if viewModel.document.layers.count > 1 {
+                Button {
+                    viewModel.deleteLayer(at: index)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            }
+
             // Selection indicator
             if index == viewModel.selectedLayerIndex {
                 Image(systemName: "checkmark.circle.fill")
