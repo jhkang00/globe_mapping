@@ -24,28 +24,33 @@ struct GlobeView: UIViewRepresentable {
 /// Custom MTKView with gesture and pencil handling
 class GlobeMTKView: MTKView {
     weak var viewModel: GlobeViewModel?
-    
+
     private var lastPanLocation: CGPoint?
+    private var lastPinchCenter: CGPoint?
+    private var pinchEndedTime: Date?
+    private var suppressNextPanDelta = false  // Skip first delta after pinch for smooth 2→1 finger transition
     private var isDragging = false
     private var isPencilDrawing = false
-    
+
     override init(frame frameRect: CGRect, device: MTLDevice? = nil) {
         super.init(frame: frameRect, device: device)
         setupGestures()
     }
-    
+
     required init(coder: NSCoder) {
         super.init(coder: coder)
         setupGestures()
     }
-    
+
     private func setupGestures() {
-        // Pan for navigation
+        // Pan for navigation (single finger only to avoid conflict with pinch)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.allowedScrollTypesMask = .all
+        pan.minimumNumberOfTouches = 1
+        pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
-        
-        // Pinch for zoom
+
+        // Pinch for zoom (two fingers)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         addGestureRecognizer(pinch)
         
@@ -59,7 +64,7 @@ class GlobeMTKView: MTKView {
         
         isMultipleTouchEnabled = true
     }
-    
+
     // MARK: Gesture Handlers
     
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -85,7 +90,7 @@ class GlobeMTKView: MTKView {
             switch gesture.state {
             case .began:
                 handleDragBegan(at: location, isPencil: false)
-                
+
             case .changed:
                 handleDragChanged(to: location, isPencil: false)
                 
@@ -99,17 +104,63 @@ class GlobeMTKView: MTKView {
     }
     
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        guard let viewModel = viewModel,
-              viewModel.toolMode == .navigate || viewModel.toolMode == .select else {
+        guard let viewModel = viewModel else { return }
+
+        guard viewModel.toolMode == .navigate || viewModel.toolMode == .select else {
             return
         }
-        
-        if gesture.state == .changed {
+
+        // Get center point between the two fingers
+        let center = gesture.location(in: self)
+
+        switch gesture.state {
+        case .began:
+            lastPinchCenter = center
+
+        case .changed:
+            // Skip if only one finger remains - this prevents the jump when
+            // the center suddenly moves from the midpoint to the remaining finger
+            guard gesture.numberOfTouches >= 2 else {
+                lastPinchCenter = center
+                gesture.scale = 1.0
+                return
+            }
+
+            // Apply zoom
+            let scale = gesture.scale
+            let factor = Float(1.0 / scale)
+
+            // Calculate center movement for panning
+            var deltaX: CGFloat = 0
+            var deltaY: CGFloat = 0
+            if let lastCenter = lastPinchCenter {
+                deltaX = center.x - lastCenter.x
+                deltaY = center.y - lastCenter.y
+            }
+
+            lastPinchCenter = center
+
             Task { @MainActor in
-                let zoomDelta = Float(1.0 - gesture.scale) * 2.0
-                viewModel.renderer?.camera.zoom(delta: zoomDelta)
+                // Apply proportional zoom
+                viewModel.renderer?.camera.zoomProportional(factor: factor)
+
+                // Apply rotation from 2-finger drag (same sensitivity as single-finger pan)
+                let sensitivity: Float = 0.3
+                viewModel.renderer?.camera.rotate(
+                    deltaLon: -Float(deltaX) * sensitivity,
+                    deltaLat: Float(deltaY) * sensitivity
+                )
             }
             gesture.scale = 1.0
+
+        case .ended, .cancelled:
+            lastPinchCenter = nil
+            lastPanLocation = nil
+            pinchEndedTime = Date()
+            suppressNextPanDelta = true  // Skip first pan delta for smooth 2→1 finger transition
+
+        default:
+            break
         }
     }
     
@@ -208,7 +259,13 @@ class GlobeMTKView: MTKView {
     @MainActor
     private func handleDragBegan(at location: CGPoint, isPencil: Bool) {
         guard let viewModel = viewModel else { return }
-        
+
+        // For fresh pan starts (not transitioning from pinch), clear the suppress flag
+        // The flag handles 2→1 finger transitions; fresh starts should work normally
+        if pinchEndedTime == nil || Date().timeIntervalSince(pinchEndedTime!) > 0.5 {
+            suppressNextPanDelta = false
+        }
+
         lastPanLocation = location
         
         guard let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) else {
@@ -238,7 +295,15 @@ class GlobeMTKView: MTKView {
     @MainActor
     private func handleDragChanged(to location: CGPoint, isPencil: Bool) {
         guard let viewModel = viewModel else { return }
-        
+
+        // Google Earth-style smooth transition: skip first delta after pinch ends
+        // This prevents the jump when going from 2 fingers to 1 finger
+        if suppressNextPanDelta {
+            suppressNextPanDelta = false
+            lastPanLocation = location  // Establish new reference point
+            return  // Skip this frame's movement
+        }
+
         switch viewModel.toolMode {
         case .navigate:
             if let lastLocation = lastPanLocation {

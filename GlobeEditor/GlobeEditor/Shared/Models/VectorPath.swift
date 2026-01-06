@@ -4,32 +4,40 @@ import SwiftUI
 // MARK: - Path Style
 
 /// Visual style for a vector path
-struct PathStyle: Codable, Equatable, Sendable {
+struct PathStyle: Codable, Sendable {
     var strokeColor: CodableColor
     var strokeWidth: Float
     var fillColor: CodableColor?
-    
+
     static let `default` = PathStyle(
         strokeColor: CodableColor(r: 0.9, g: 0.9, b: 0.9, a: 1.0),
         strokeWidth: 1.5,
         fillColor: nil
     )
-    
+
     static let coastline = PathStyle(
         strokeColor: CodableColor(r: 0.8, g: 0.85, b: 0.9, a: 1.0),
         strokeWidth: 1.5,
         fillColor: nil
     )
-    
+
     static let border = PathStyle(
         strokeColor: CodableColor(r: 0.6, g: 0.6, b: 0.6, a: 1.0),
         strokeWidth: 1.0,
         fillColor: nil
     )
+
+    nonisolated static func == (lhs: PathStyle, rhs: PathStyle) -> Bool {
+        lhs.strokeColor == rhs.strokeColor &&
+        lhs.strokeWidth == rhs.strokeWidth &&
+        lhs.fillColor == rhs.fillColor
+    }
 }
 
+extension PathStyle: Equatable {}
+
 /// RGBA color that survives JSON encoding
-struct CodableColor: Codable, Equatable, Sendable {
+struct CodableColor: Codable, Sendable {
     var r: Float
     var g: Float
     var b: Float
@@ -55,7 +63,13 @@ struct CodableColor: Codable, Equatable, Sendable {
         self.b = 0.5
         self.a = 1.0
     }
+
+    nonisolated static func == (lhs: CodableColor, rhs: CodableColor) -> Bool {
+        lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a
+    }
 }
+
+extension CodableColor: Equatable {}
 
 // MARK: - Terrain Type (Future)
 
@@ -87,7 +101,7 @@ enum TerrainType: String, Codable, CaseIterable, Sendable {
 // MARK: - Vector Path
 
 /// A path on the globe - either linear points or Bézier curves
-struct VectorPath: Identifiable, Codable, Equatable, Sendable {
+struct VectorPath: Identifiable, Codable, Sendable {
     let id: UUID
     var pathType: PathType
     var cubicSegments: [CubicSegment]?
@@ -95,10 +109,21 @@ struct VectorPath: Identifiable, Codable, Equatable, Sendable {
     var isClosed: Bool
     var style: PathStyle
     var terrain: TerrainType?
-    
+
     enum PathType: String, Codable, Sendable {
         case linear
         case cubic
+    }
+
+    // Explicit nonisolated Equatable for Swift 6 compatibility
+    nonisolated static func == (lhs: VectorPath, rhs: VectorPath) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.pathType == rhs.pathType &&
+        lhs.cubicSegments == rhs.cubicSegments &&
+        lhs.linearPoints == rhs.linearPoints &&
+        lhs.isClosed == rhs.isClosed &&
+        lhs.style == rhs.style &&
+        lhs.terrain == rhs.terrain
     }
     
     // MARK: Initializers
@@ -255,3 +280,4 @@ struct VectorLayer: Identifiable, Codable, Sendable {
 }
 
 extension VectorLayer: Equatable {}
+extension VectorPath: Equatable {}

@@ -115,8 +115,30 @@ struct GlobeDocument: FileDocument, Equatable, Sendable {
 // MARK: - Codable Helper
 
 /// Internal codable representation (keeps FileDocument conformance clean)
-private struct DocumentCodable: Codable {
+private struct DocumentCodable: Sendable {
     var formatVersion: String
     var meta: GlobeDocument.Metadata
     var layers: [VectorLayer]
+
+    enum CodingKeys: String, CodingKey {
+        case formatVersion, meta, layers
+    }
+}
+
+extension DocumentCodable: Decodable {
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try container.decode(String.self, forKey: .formatVersion)
+        meta = try container.decode(GlobeDocument.Metadata.self, forKey: .meta)
+        layers = try container.decode([VectorLayer].self, forKey: .layers)
+    }
+}
+
+extension DocumentCodable: Encodable {
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(formatVersion, forKey: .formatVersion)
+        try container.encode(meta, forKey: .meta)
+        try container.encode(layers, forKey: .layers)
+    }
 }

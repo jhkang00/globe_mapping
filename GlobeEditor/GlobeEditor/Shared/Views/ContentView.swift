@@ -134,7 +134,7 @@ struct ContentView: View {
             Spacer()
             
             // Zoom level
-            Text(String(format: "%.1f×", viewModel.renderer?.camera.zoomLevel ?? 0))
+            Text(String(format: "%.1f×", viewModel.renderer?.camera.zoomLevel ?? 0.0))
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.7))
                 .monospacedDigit()

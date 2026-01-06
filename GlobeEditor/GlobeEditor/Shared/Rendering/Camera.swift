@@ -82,8 +82,17 @@ final class Camera: ObservableObject {
         updatePosition()
     }
     
+    /// Linear zoom (legacy) - adds delta to distance
     func zoom(delta: Float) {
         distance += delta
+        zoomLevel = computedZoomLevel
+        updatePosition()
+    }
+
+    /// Proportional zoom (Google Earth style) - multiplies distance by factor
+    /// factor < 1.0 = zoom in, factor > 1.0 = zoom out
+    func zoomProportional(factor: Float) {
+        distance *= factor
         zoomLevel = computedZoomLevel
         updatePosition()
     }
