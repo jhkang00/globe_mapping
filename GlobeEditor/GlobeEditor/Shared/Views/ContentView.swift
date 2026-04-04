@@ -8,6 +8,7 @@ struct ContentView: View {
     
     @State private var showLayerPanel = false
     @State private var showSaveConfirmation = false
+    @State private var terrainPaletteExpanded = true
     
     init(document: Binding<GlobeDocument>) {
         self._document = document
@@ -27,12 +28,17 @@ struct ContentView: View {
             if viewModel.selection != nil {
                 selectionOverlay
             }
-            
+
             // Tool palette (shown on squeeze)
             if viewModel.showToolPalette {
                 toolPaletteOverlay
             }
-            
+
+            // Terrain sub-palette (shown when terrain tool active)
+            if viewModel.toolMode == .terrain {
+                terrainPalette
+            }
+
             // Main UI
             VStack(spacing: 0) {
                 topToolbar
@@ -134,7 +140,7 @@ struct ContentView: View {
             Spacer()
             
             // Zoom level
-            Text(String(format: "%.1f×", viewModel.renderer?.camera.zoomLevel ?? 0.0))
+            Text(String(format: "%.1f×", viewModel.renderer?.camera.zoomLevel ?? 0))
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.7))
                 .monospacedDigit()
@@ -176,10 +182,19 @@ struct ContentView: View {
             Circle()
                 .fill(viewModel.toolMode.activeColor)
                 .frame(width: 8, height: 8)
-            
-            Text(viewModel.toolMode.label)
-                .font(.caption)
-                .foregroundStyle(.white)
+
+            if viewModel.toolMode == .terrain {
+                Image(systemName: viewModel.selectedTerrain.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(viewModel.selectedTerrain.defaultColor.swiftUI)
+                Text(viewModel.selectedTerrain.label)
+                    .font(.caption)
+                    .foregroundStyle(.white)
+            } else {
+                Text(viewModel.toolMode.label)
+                    .font(.caption)
+                    .foregroundStyle(.white)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -255,9 +270,9 @@ struct ContentView: View {
                         viewModel.showToolPalette = false
                     }
                 }
-            
+
             // Palette
-            VStack(spacing: 12) {
+            VStack(spacing: 0) {
                 ForEach(ToolMode.allCases) { mode in
                     Button {
                         withAnimation(.spring(response: 0.2)) {
@@ -280,13 +295,135 @@ struct ContentView: View {
                     }
                     .foregroundStyle(.white)
                 }
+
+                // Quick terrain sub-options when terrain is selected
+                if viewModel.toolMode == .terrain {
+                    Divider().padding(.horizontal, 8)
+
+                    ForEach(TerrainType.drawableTypes, id: \.rawValue) { terrain in
+                        Button {
+                            withAnimation(.spring(response: 0.2)) {
+                                viewModel.selectedTerrain = terrain
+                                viewModel.showToolPalette = false
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: terrain.systemImage)
+                                    .foregroundStyle(terrain.defaultColor.swiftUI)
+                                    .frame(width: 24)
+                                Text(terrain.label)
+                                    .font(.callout)
+                                Spacer()
+                                if viewModel.selectedTerrain == terrain {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                        }
+                        .foregroundStyle(.white)
+                    }
+                }
             }
-            .frame(width: 200)
+            .frame(width: 220)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         }
         .transition(.opacity)
     }
     
+    // MARK: - Terrain Palette
+
+    private var terrainPalette: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 4) {
+                // Collapse/expand toggle
+                Button {
+                    withAnimation(.spring(response: 0.2)) {
+                        terrainPaletteExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: terrainPaletteExpanded ? "chevron.left" : "chevron.right")
+                            .font(.caption2)
+                        if terrainPaletteExpanded {
+                            Text("Terrain")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+
+                if terrainPaletteExpanded {
+                    // Full palette with labels
+                    ForEach(TerrainType.drawableTypes, id: \.rawValue) { terrain in
+                        Button {
+                            withAnimation(.spring(response: 0.2)) {
+                                viewModel.selectedTerrain = terrain
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: terrain.systemImage)
+                                    .foregroundStyle(terrain.defaultColor.swiftUI)
+                                    .frame(width: 24)
+                                Text(terrain.label)
+                                    .font(.callout)
+                                Spacer()
+                                if viewModel.selectedTerrain == terrain {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                viewModel.selectedTerrain == terrain
+                                ? terrain.defaultColor.swiftUI.opacity(0.2)
+                                : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                        }
+                        .foregroundStyle(.white)
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    // Compact icon-only strip
+                    ForEach(TerrainType.drawableTypes, id: \.rawValue) { terrain in
+                        Button {
+                            withAnimation(.spring(response: 0.2)) {
+                                viewModel.selectedTerrain = terrain
+                            }
+                        } label: {
+                            Image(systemName: terrain.systemImage)
+                                .foregroundStyle(terrain.defaultColor.swiftUI)
+                                .frame(width: 36, height: 36)
+                                .background(
+                                    viewModel.selectedTerrain == terrain
+                                    ? terrain.defaultColor.swiftUI.opacity(0.2)
+                                    : Color.clear,
+                                    in: Circle()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(8)
+            .frame(width: terrainPaletteExpanded ? 200 : 52)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.leading)
+            .padding(.vertical)
+
+            Spacer()
+        }
+        .transition(.move(edge: .leading).combined(with: .opacity))
+    }
+
     // MARK: - Layer Panel
     
     private var layerPanel: some View {

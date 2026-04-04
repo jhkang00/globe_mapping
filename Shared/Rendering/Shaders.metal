@@ -201,9 +201,9 @@ fragment float4 strokeFragment(LineVertexOut in [[stage_in]]) {
     if (in.color.a < 0.01) {
         discard_fragment();
     }
-    
-    // Bright white for visibility while drawing
-    return float4(1.0, 1.0, 1.0, 1.0);
+
+    // Use vertex color (white for draw mode, terrain color for terrain mode)
+    return in.color;
 }
 
 // MARK: - Eraser Preview
@@ -234,6 +234,62 @@ fragment float4 eraserFragment(
     // Animated dashed circle effect
     float angle = atan2(in.color.g, in.color.r);  // Use color as angle storage hack
     float dash = step(0.5, fract(angle * 4.0 + uniforms.time * 2.0));
-    
+
     return float4(1.0, 0.3, 0.3, dash * 0.8);
+}
+
+// MARK: - Mountain Ribbon Rendering
+
+vertex LineVertexOut ribbonVertex(
+    LineVertexIn in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    LineVertexOut out;
+
+    float3 pos = in.position;
+    if (length(pos) > 0.001) {
+        pos = normalize(pos) * 1.004;  // Slightly above sphere
+    }
+
+    float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
+    out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
+    out.color = in.color;
+    out.depth = out.position.z / out.position.w;
+
+    return out;
+}
+
+fragment float4 ribbonFragment(LineVertexOut in [[stage_in]]) {
+    if (in.color.a < 0.01) {
+        discard_fragment();
+    }
+    return in.color;
+}
+
+// MARK: - Region Terrain Rendering
+
+vertex LineVertexOut regionVertex(
+    LineVertexIn in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    LineVertexOut out;
+
+    float3 pos = in.position;
+    if (length(pos) > 0.001) {
+        pos = normalize(pos) * 1.002;  // Just above sphere, below lines
+    }
+
+    float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
+    out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
+    out.color = in.color;
+    out.depth = out.position.z / out.position.w;
+
+    return out;
+}
+
+fragment float4 regionFragment(LineVertexOut in [[stage_in]]) {
+    if (in.color.a < 0.01) {
+        discard_fragment();
+    }
+    return in.color;
 }

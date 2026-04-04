@@ -33,14 +33,19 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
     private let selectionPipeline: MTLRenderPipelineState
     private let strokePipeline: MTLRenderPipelineState
     private let eraserPipeline: MTLRenderPipelineState
+    private let ribbonPipeline: MTLRenderPipelineState
+    private let regionPipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
-    
+
     // Geometry
     private let sphereGeometry: SphereGeometry
     private let gridGeometry: GridGeometry
     let pathGeometry: PathGeometry
     let strokeGeometry: StrokeGeometry
     let eraserGeometry: EraserGeometry
+    let ribbonGeometry: RibbonGeometry
+    let liveRibbonGeometry: RibbonGeometry
+    let regionGeometry: RegionGeometry
     
     // MARK: Public State
     
@@ -48,9 +53,29 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
     private let startTime = Date()
     
     // Current drawing stroke
+    var currentStrokeColor: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)
     var currentStroke: [Coordinate] = [] {
-        didSet { strokeGeometry.update(points: currentStroke) }
+        didSet {
+            // For mountain strokes, show ribbon preview instead of line preview
+            if let pressures = currentStrokePressures, !currentStroke.isEmpty {
+                strokeGeometry.update(points: [])  // Suppress line preview
+                let previewPath = VectorPath(
+                    linearPoints: currentStroke,
+                    style: currentStrokeTerrainStyle ?? PathStyle.default,
+                    terrain: .mountainRange,
+                    pressures: pressures
+                )
+                liveRibbonGeometry.update(paths: [previewPath])
+            } else {
+                strokeGeometry.update(points: currentStroke, color: currentStrokeColor)
+                liveRibbonGeometry.update(paths: [])
+            }
+        }
     }
+
+    /// Set these before starting a mountain stroke to enable live ribbon preview
+    var currentStrokePressures: [Float]?
+    var currentStrokeTerrainStyle: PathStyle?
     
     // Eraser position
     var eraserPosition: Coordinate? {
@@ -87,6 +112,9 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
         pathGeometry = PathGeometry(device: device)
         strokeGeometry = StrokeGeometry(device: device)
         eraserGeometry = EraserGeometry(device: device)
+        ribbonGeometry = RibbonGeometry(device: device)
+        liveRibbonGeometry = RibbonGeometry(device: device)
+        regionGeometry = RegionGeometry(device: device)
         
         // Create shader library
         guard let library = device.makeDefaultLibrary() else {
@@ -189,7 +217,41 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
             return nil
         }
         self.eraserPipeline = eraserPipeline
-        
+
+        // Ribbon pipeline (mountain ranges - triangle strip with blending)
+        let ribbonDesc = MTLRenderPipelineDescriptor()
+        ribbonDesc.vertexFunction = library.makeFunction(name: "ribbonVertex")
+        ribbonDesc.fragmentFunction = library.makeFunction(name: "ribbonFragment")
+        ribbonDesc.vertexDescriptor = LineVertex.descriptor
+        ribbonDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        ribbonDesc.colorAttachments[0].isBlendingEnabled = true
+        ribbonDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        ribbonDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        ribbonDesc.depthAttachmentPixelFormat = .depth32Float
+
+        guard let ribbonPipeline = try? device.makeRenderPipelineState(descriptor: ribbonDesc) else {
+            print("Failed to create ribbon pipeline")
+            return nil
+        }
+        self.ribbonPipeline = ribbonPipeline
+
+        // Region pipeline (terrain area stamps - triangle fan with blending)
+        let regionDesc = MTLRenderPipelineDescriptor()
+        regionDesc.vertexFunction = library.makeFunction(name: "regionVertex")
+        regionDesc.fragmentFunction = library.makeFunction(name: "regionFragment")
+        regionDesc.vertexDescriptor = LineVertex.descriptor
+        regionDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        regionDesc.colorAttachments[0].isBlendingEnabled = true
+        regionDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        regionDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        regionDesc.depthAttachmentPixelFormat = .depth32Float
+
+        guard let regionPipeline = try? device.makeRenderPipelineState(descriptor: regionDesc) else {
+            print("Failed to create region pipeline")
+            return nil
+        }
+        self.regionPipeline = regionPipeline
+
         // Depth state
         let depthDesc = MTLDepthStencilDescriptor()
         depthDesc.depthCompareFunction = .less
@@ -270,6 +332,30 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
             encoder.drawPrimitives(type: .lineStrip, vertexStart: 0, vertexCount: pathGeometry.selectionVertexCount)
         }
         
+        // Draw mountain ribbons (triangle strips)
+        if let ribbonBuffer = ribbonGeometry.vertexBuffer, ribbonGeometry.vertexCount > 0 {
+            encoder.setRenderPipelineState(ribbonPipeline)
+            encoder.setVertexBuffer(ribbonBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: ribbonGeometry.vertexCount)
+        }
+
+        // Draw live ribbon preview (mountain drawing in progress)
+        if let liveBuffer = liveRibbonGeometry.vertexBuffer, liveRibbonGeometry.vertexCount > 0 {
+            encoder.setRenderPipelineState(ribbonPipeline)
+            encoder.setVertexBuffer(liveBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: liveRibbonGeometry.vertexCount)
+        }
+
+        // Draw region terrain stamps (triangles)
+        if let regionBuffer = regionGeometry.vertexBuffer, regionGeometry.vertexCount > 0 {
+            encoder.setRenderPipelineState(regionPipeline)
+            encoder.setVertexBuffer(regionBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: regionGeometry.vertexCount)
+        }
+
         // Draw current stroke
         if let strokeBuffer = strokeGeometry.vertexBuffer, strokeGeometry.vertexCount > 0 {
             encoder.setRenderPipelineState(strokePipeline)
@@ -277,7 +363,7 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
             encoder.drawPrimitives(type: .lineStrip, vertexStart: 0, vertexCount: strokeGeometry.vertexCount)
         }
-        
+
         // Draw eraser preview
         if let eraserBuffer = eraserGeometry.vertexBuffer, eraserGeometry.vertexCount > 0 {
             encoder.setRenderPipelineState(eraserPipeline)
@@ -340,6 +426,27 @@ final class GlobeRenderer: NSObject, MTKViewDelegate {
     // MARK: Update Methods
     
     func updatePaths(_ paths: [VectorPath], selection: (layerIndex: Int, pathIndex: Int, path: VectorPath)? = nil) {
-        pathGeometry.update(paths: paths, selection: selection)
+        // Separate paths by rendering type
+        var linePaths: [VectorPath] = []
+        var mountainPaths: [VectorPath] = []
+        var regionPaths: [VectorPath] = []
+
+        for path in paths {
+            switch path.terrain {
+            case .mountainRange:
+                mountainPaths.append(path)
+            case .tropicalForest, .temperateForest, .desert, .tundra, .ice, .ocean, .land, .lake:
+                regionPaths.append(path)
+            default:
+                // coastlines, borders, rivers, and plain draws all render as lines
+                linePaths.append(path)
+            }
+        }
+
+        // Selection highlight is always rendered as a line overlay (via pathGeometry),
+        // regardless of the selected path's terrain type.
+        pathGeometry.update(paths: linePaths, selection: selection)
+        ribbonGeometry.update(paths: mountainPaths)
+        regionGeometry.update(paths: regionPaths)
     }
 }

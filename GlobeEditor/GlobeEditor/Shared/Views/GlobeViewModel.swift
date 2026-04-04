@@ -9,33 +9,37 @@ enum ToolMode: String, CaseIterable, Identifiable {
     case select
     case draw
     case erase
-    
+    case terrain
+
     var id: String { rawValue }
-    
+
     var label: String {
         switch self {
         case .navigate: return "Navigate"
         case .select: return "Select"
         case .draw: return "Draw"
         case .erase: return "Erase"
+        case .terrain: return "Terrain"
         }
     }
-    
+
     var systemImage: String {
         switch self {
         case .navigate: return "hand.point.up"
         case .select: return "cursorarrow"
         case .draw: return "pencil"
         case .erase: return "eraser"
+        case .terrain: return "mountain.2.fill"
         }
     }
-    
+
     var activeColor: Color {
         switch self {
         case .navigate: return .blue
         case .select: return .yellow
         case .draw: return .green
         case .erase: return .red
+        case .terrain: return .orange
         }
     }
 }
@@ -68,6 +72,7 @@ final class GlobeViewModel: ObservableObject {
                 updateRenderer()
             }
             if toolMode != .erase { renderer?.eraserPosition = nil }
+            if toolMode != .draw && toolMode != .terrain { cancelStroke() }
         }
     }
     
@@ -75,8 +80,12 @@ final class GlobeViewModel: ObservableObject {
     @Published var selection: PathSelection?
     @Published var isDrawing: Bool = false
     
+    // MARK: Terrain
+
+    @Published var selectedTerrain: TerrainType = .river
+
     // MARK: Eraser
-    
+
     @Published var eraserRadius: Float = 2.0
     
     // MARK: History
@@ -96,8 +105,13 @@ final class GlobeViewModel: ObservableObject {
     @Published var showToolPalette: Bool = false
     @Published var toolPalettePosition: CGPoint = .zero
     
+    // MARK: Stroke Pressure Tracking
+
+    /// Pressure values collected during the current stroke (parallel to renderer.currentStroke)
+    private var currentPressures: [Float] = []
+
     // MARK: Transform State (for dragging)
-    
+
     private var dragStartCoordinate: Coordinate?
     private var originalPath: VectorPath?
     
@@ -128,50 +142,88 @@ final class GlobeViewModel: ObservableObject {
     }
     
     // MARK: Drawing
-    
-    func beginStroke(at coordinate: Coordinate) {
-        guard toolMode == .draw else { return }
+
+    func beginStroke(at coordinate: Coordinate, pressure: Float = 0.5) {
+        guard toolMode == .draw || toolMode == .terrain else { return }
         isDrawing = true
+        currentPressures = [pressure]
+
+        // Configure renderer preview style
+        if toolMode == .terrain {
+            renderer?.currentStrokeColor = selectedTerrain.defaultColor.simd
+            if selectedTerrain == .mountainRange {
+                renderer?.currentStrokePressures = currentPressures
+                renderer?.currentStrokeTerrainStyle = selectedTerrain.defaultStyle
+            } else {
+                renderer?.currentStrokePressures = nil
+                renderer?.currentStrokeTerrainStyle = nil
+            }
+        } else {
+            renderer?.currentStrokeColor = SIMD4<Float>(1, 1, 1, 1)
+            renderer?.currentStrokePressures = nil
+            renderer?.currentStrokeTerrainStyle = nil
+        }
+
         renderer?.currentStroke = [coordinate]
     }
-    
-    func continueStroke(to coordinate: Coordinate) {
+
+    func continueStroke(to coordinate: Coordinate, pressure: Float = 0.5) {
         guard isDrawing, let renderer = renderer else { return }
-        
+
         if let last = renderer.currentStroke.last {
             let distance = last.distance(to: coordinate)
             if distance > 0.5 {  // Minimum spacing in degrees
+                currentPressures.append(pressure)
+                // Update pressure array on renderer BEFORE appending coordinate,
+                // so the didSet on currentStroke sees the updated pressures
+                renderer.currentStrokePressures = currentPressures
                 renderer.currentStroke.append(coordinate)
             }
         }
     }
-    
+
     func endStroke() {
         guard isDrawing, let renderer = renderer, renderer.currentStroke.count >= 2 else {
             cancelStroke()
             return
         }
-        
-        let path = VectorPath(linearPoints: renderer.currentStroke)
-        
+
         guard selectedLayerIndex < document.layers.count else {
             cancelStroke()
             return
         }
-        
+
+        let path: VectorPath
+        if toolMode == .terrain {
+            path = VectorPath(
+                linearPoints: renderer.currentStroke,
+                style: selectedTerrain.defaultStyle,
+                terrain: selectedTerrain,
+                pressures: selectedTerrain == .mountainRange ? currentPressures : nil
+            )
+        } else {
+            path = VectorPath(linearPoints: renderer.currentStroke)
+        }
+
         document.addPath(path, toLayerAt: selectedLayerIndex)
         editHistory.record(.addPath(layerIndex: selectedLayerIndex, path: path))
-        
+
         pencilManager.pathCompleteFeedback()
-        
+
         isDrawing = false
         renderer.currentStroke = []
+        currentPressures = []
+        renderer.currentStrokePressures = nil
+        renderer.currentStrokeTerrainStyle = nil
         updateRenderer()
     }
-    
+
     func cancelStroke() {
         isDrawing = false
         renderer?.currentStroke = []
+        currentPressures = []
+        renderer?.currentStrokePressures = nil
+        renderer?.currentStrokeTerrainStyle = nil
     }
     
     // MARK: Selection
@@ -346,36 +398,45 @@ final class GlobeViewModel: ObservableObject {
     
     private func splitPath(_ path: VectorPath, at point: Coordinate, radius: Double) -> [VectorPath]? {
         let tessellated = path.tessellate()
-        
+
         var eraseIndices = Set<Int>()
         for (i, coord) in tessellated.enumerated() {
             if point.distance(to: coord) < radius {
                 eraseIndices.insert(i)
             }
         }
-        
+
         guard !eraseIndices.isEmpty else { return nil }
-        
-        var segments: [[Coordinate]] = []
-        var current: [Coordinate] = []
-        
+
+        // For linear paths with pressure data, the tessellated points are the same
+        // as linearPoints, so indices map 1:1 to the pressures array.
+        let sourcePressures = path.pressures
+
+        var segments: [([Coordinate], [Float]?)] = []
+        var currentCoords: [Coordinate] = []
+        var currentPressures: [Float]? = sourcePressures != nil ? [] : nil
+
         for (i, coord) in tessellated.enumerated() {
             if eraseIndices.contains(i) {
-                if current.count >= 2 {
-                    segments.append(current)
+                if currentCoords.count >= 2 {
+                    segments.append((currentCoords, currentPressures))
                 }
-                current = []
+                currentCoords = []
+                currentPressures = sourcePressures != nil ? [] : nil
             } else {
-                current.append(coord)
+                currentCoords.append(coord)
+                if let sp = sourcePressures, i < sp.count {
+                    currentPressures?.append(sp[i])
+                }
             }
         }
-        
-        if current.count >= 2 {
-            segments.append(current)
+
+        if currentCoords.count >= 2 {
+            segments.append((currentCoords, currentPressures))
         }
-        
-        return segments.map { points in
-            VectorPath(linearPoints: points, isClosed: false, style: path.style, terrain: path.terrain)
+
+        return segments.map { (points, pressures) in
+            VectorPath(linearPoints: points, isClosed: false, style: path.style, terrain: path.terrain, pressures: pressures)
         }
     }
     

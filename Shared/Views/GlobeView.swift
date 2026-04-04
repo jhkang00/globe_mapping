@@ -100,7 +100,7 @@ class GlobeMTKView: MTKView {
     
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         guard let viewModel = viewModel,
-              viewModel.toolMode == .navigate || viewModel.toolMode == .select else {
+              viewModel.toolMode == .navigate || viewModel.toolMode == .select || viewModel.toolMode == .terrain else {
             return
         }
         
@@ -137,45 +137,47 @@ class GlobeMTKView: MTKView {
     }
     
     // MARK: Touch Handling (for Apple Pencil)
-    
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let viewModel = viewModel else {
             super.touchesBegan(touches, with: event)
             return
         }
-        
+
         for touch in touches {
             if touch.type == .pencil {
                 let location = touch.location(in: self)
+                let pressure = Float(touch.force / max(touch.maximumPossibleForce, 0.001))
                 isPencilDrawing = true
-                
+
                 Task { @MainActor in
-                    handleDragBegan(at: location, isPencil: true)
+                    handleDragBegan(at: location, isPencil: true, pressure: pressure)
                 }
                 return
             }
         }
-        
+
         super.touchesBegan(touches, with: event)
     }
-    
+
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let viewModel = viewModel, isPencilDrawing else {
             super.touchesMoved(touches, with: event)
             return
         }
-        
+
         for touch in touches {
             if touch.type == .pencil {
                 let location = touch.location(in: self)
-                
+                let pressure = Float(touch.force / max(touch.maximumPossibleForce, 0.001))
+
                 Task { @MainActor in
-                    handleDragChanged(to: location, isPencil: true)
+                    handleDragChanged(to: location, isPencil: true, pressure: pressure)
                 }
                 return
             }
         }
-        
+
         super.touchesMoved(touches, with: event)
     }
     
@@ -204,29 +206,29 @@ class GlobeMTKView: MTKView {
     }
     
     // MARK: Unified Drag Handling
-    
+
     @MainActor
-    private func handleDragBegan(at location: CGPoint, isPencil: Bool) {
+    private func handleDragBegan(at location: CGPoint, isPencil: Bool, pressure: Float = 0.5) {
         guard let viewModel = viewModel else { return }
-        
+
         lastPanLocation = location
-        
+
         guard let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) else {
             return
         }
-        
+
         switch viewModel.toolMode {
         case .navigate:
             break  // Handled in changed
-            
-        case .draw:
+
+        case .draw, .terrain:
             isDragging = true
-            viewModel.beginStroke(at: coord)
-            
+            viewModel.beginStroke(at: coord, pressure: pressure)
+
         case .erase:
             isDragging = true
             viewModel.erase(at: coord)
-            
+
         case .select:
             if viewModel.selection != nil {
                 isDragging = true
@@ -234,11 +236,11 @@ class GlobeMTKView: MTKView {
             }
         }
     }
-    
+
     @MainActor
-    private func handleDragChanged(to location: CGPoint, isPencil: Bool) {
+    private func handleDragChanged(to location: CGPoint, isPencil: Bool, pressure: Float = 0.5) {
         guard let viewModel = viewModel else { return }
-        
+
         switch viewModel.toolMode {
         case .navigate:
             if let lastLocation = lastPanLocation {
@@ -250,14 +252,14 @@ class GlobeMTKView: MTKView {
                 )
             }
             lastPanLocation = location
-            
-        case .draw:
+
+        case .draw, .terrain:
             if isDragging {
                 if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
-                    viewModel.continueStroke(to: coord)
+                    viewModel.continueStroke(to: coord, pressure: pressure)
                 }
             }
-            
+
         case .erase:
             if isDragging {
                 if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
@@ -265,7 +267,7 @@ class GlobeMTKView: MTKView {
                     viewModel.updateEraserPosition(coord)
                 }
             }
-            
+
         case .select:
             if isDragging && viewModel.selection != nil {
                 if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
@@ -287,25 +289,25 @@ class GlobeMTKView: MTKView {
     @MainActor
     private func handleDragEnded(isPencil: Bool) {
         guard let viewModel = viewModel else { return }
-        
+
         switch viewModel.toolMode {
         case .navigate:
             break
-            
-        case .draw:
+
+        case .draw, .terrain:
             if isDragging {
                 viewModel.endStroke()
             }
-            
+
         case .erase:
             viewModel.updateEraserPosition(nil)
-            
+
         case .select:
             if isDragging {
                 viewModel.endMove()
             }
         }
-        
+
         isDragging = false
         lastPanLocation = nil
     }
@@ -416,25 +418,25 @@ class GlobeMTKView: MTKView {
     @MainActor
     private func handleDragBegan(at location: CGPoint) {
         guard let viewModel = viewModel else { return }
-        
+
         lastPanLocation = location
-        
+
         guard let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) else {
             return
         }
-        
+
         switch viewModel.toolMode {
         case .navigate:
             break
-            
-        case .draw:
+
+        case .draw, .terrain:
             isDragging = true
             viewModel.beginStroke(at: coord)
-            
+
         case .erase:
             isDragging = true
             viewModel.erase(at: coord)
-            
+
         case .select:
             if viewModel.selection != nil {
                 isDragging = true
@@ -442,11 +444,11 @@ class GlobeMTKView: MTKView {
             }
         }
     }
-    
+
     @MainActor
     private func handleDragChanged(to location: CGPoint) {
         guard let viewModel = viewModel else { return }
-        
+
         switch viewModel.toolMode {
         case .navigate:
             if let lastLocation = lastPanLocation {
@@ -458,21 +460,21 @@ class GlobeMTKView: MTKView {
                 )
             }
             lastPanLocation = location
-            
-        case .draw:
+
+        case .draw, .terrain:
             if isDragging {
                 if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
                     viewModel.continueStroke(to: coord)
                 }
             }
-            
+
         case .erase:
             if isDragging {
                 if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
                     viewModel.erase(at: coord)
                 }
             }
-            
+
         case .select:
             if isDragging && viewModel.selection != nil {
                 if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
@@ -489,29 +491,29 @@ class GlobeMTKView: MTKView {
             }
         }
     }
-    
+
     @MainActor
     private func handleDragEnded() {
         guard let viewModel = viewModel else { return }
-        
+
         switch viewModel.toolMode {
         case .navigate:
             break
-            
-        case .draw:
+
+        case .draw, .terrain:
             if isDragging {
                 viewModel.endStroke()
             }
-            
+
         case .erase:
             break
-            
+
         case .select:
             if isDragging {
                 viewModel.endMove()
             }
         }
-        
+
         isDragging = false
         lastPanLocation = nil
     }

@@ -64,7 +64,14 @@ fragment float4 sphereFragment(
     rim = pow(rim, 2.5) * 0.3;
     float3 rimColor = float3(0.3, 0.4, 0.6);
     
-    float3 finalColor = baseColor * diffuse + rimColor * rim;
+    // Subtle grid pattern
+    float lat = asin(in.worldNormal.z) * 57.2958;  // to degrees
+    float lon = atan2(in.worldNormal.y, in.worldNormal.x) * 57.2958;
+    float gridLat = smoothstep(0.4, 0.5, abs(fract(lat / 10.0) - 0.5) * 2.0);
+    float gridLon = smoothstep(0.4, 0.5, abs(fract(lon / 10.0) - 0.5) * 2.0);
+    float grid = min(gridLat, gridLon) * 0.05;
+    
+    float3 finalColor = baseColor * diffuse + rimColor * rim + grid;
     
     return float4(finalColor, 1.0);
 }
@@ -194,9 +201,9 @@ fragment float4 strokeFragment(LineVertexOut in [[stage_in]]) {
     if (in.color.a < 0.01) {
         discard_fragment();
     }
-    
-    // Bright white for visibility while drawing
-    return float4(1.0, 1.0, 1.0, 1.0);
+
+    // Use vertex color (white for draw mode, terrain color for terrain mode)
+    return in.color;
 }
 
 // MARK: - Eraser Preview
@@ -227,6 +234,62 @@ fragment float4 eraserFragment(
     // Animated dashed circle effect
     float angle = atan2(in.color.g, in.color.r);  // Use color as angle storage hack
     float dash = step(0.5, fract(angle * 4.0 + uniforms.time * 2.0));
-    
+
     return float4(1.0, 0.3, 0.3, dash * 0.8);
+}
+
+// MARK: - Mountain Ribbon Rendering
+
+vertex LineVertexOut ribbonVertex(
+    LineVertexIn in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    LineVertexOut out;
+
+    float3 pos = in.position;
+    if (length(pos) > 0.001) {
+        pos = normalize(pos) * 1.004;  // Slightly above sphere
+    }
+
+    float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
+    out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
+    out.color = in.color;
+    out.depth = out.position.z / out.position.w;
+
+    return out;
+}
+
+fragment float4 ribbonFragment(LineVertexOut in [[stage_in]]) {
+    if (in.color.a < 0.01) {
+        discard_fragment();
+    }
+    return in.color;
+}
+
+// MARK: - Region Terrain Rendering
+
+vertex LineVertexOut regionVertex(
+    LineVertexIn in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    LineVertexOut out;
+
+    float3 pos = in.position;
+    if (length(pos) > 0.001) {
+        pos = normalize(pos) * 1.002;  // Just above sphere, below lines
+    }
+
+    float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
+    out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
+    out.color = in.color;
+    out.depth = out.position.z / out.position.w;
+
+    return out;
+}
+
+fragment float4 regionFragment(LineVertexOut in [[stage_in]]) {
+    if (in.color.a < 0.01) {
+        discard_fragment();
+    }
+    return in.color;
 }

@@ -13,7 +13,7 @@ struct GlobeDocument: FileDocument, Equatable, Sendable {
     
     // MARK: Document Content
     
-    var formatVersion: String = "2.0"
+    var formatVersion: String = "2.1"
     var meta: Metadata
     var layers: [VectorLayer]
     

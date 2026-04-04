@@ -57,29 +57,124 @@ struct CodableColor: Codable, Equatable, Sendable {
     }
 }
 
-// MARK: - Terrain Type (Future)
+// MARK: - Terrain Type
 
-/// Terrain classification for regions
+/// Terrain classification for features on the globe
 enum TerrainType: String, Codable, CaseIterable, Sendable {
     case ocean
     case land
-    case forest
+    case tropicalForest
+    case temperateForest
     case desert
-    case mountain
+    case mountainRange
+    case tundra
     case ice
     case lake
     case river
-    
+
     var defaultColor: CodableColor {
         switch self {
         case .ocean: return CodableColor(r: 0.2, g: 0.4, b: 0.7)
         case .land: return CodableColor(r: 0.6, g: 0.7, b: 0.5)
-        case .forest: return CodableColor(r: 0.2, g: 0.5, b: 0.3)
+        case .tropicalForest: return CodableColor(r: 0.15, g: 0.5, b: 0.25)
+        case .temperateForest: return CodableColor(r: 0.3, g: 0.55, b: 0.3)
         case .desert: return CodableColor(r: 0.85, g: 0.75, b: 0.5)
-        case .mountain: return CodableColor(r: 0.5, g: 0.45, b: 0.4)
+        case .mountainRange: return CodableColor(r: 0.55, g: 0.45, b: 0.35)
+        case .tundra: return CodableColor(r: 0.75, g: 0.8, b: 0.82)
         case .ice: return CodableColor(r: 0.9, g: 0.95, b: 1.0)
         case .lake: return CodableColor(r: 0.3, g: 0.5, b: 0.8)
-        case .river: return CodableColor(r: 0.25, g: 0.45, b: 0.75)
+        case .river: return CodableColor(r: 0.25, g: 0.5, b: 0.85)
+        }
+    }
+
+    /// Human-readable label for UI
+    var label: String {
+        switch self {
+        case .ocean: return "Ocean"
+        case .land: return "Land"
+        case .tropicalForest: return "Tropical Forest"
+        case .temperateForest: return "Temperate Forest"
+        case .desert: return "Desert"
+        case .mountainRange: return "Mountains"
+        case .tundra: return "Tundra"
+        case .ice: return "Ice"
+        case .lake: return "Lake"
+        case .river: return "River"
+        }
+    }
+
+    /// SF Symbol for terrain palette
+    var systemImage: String {
+        switch self {
+        case .ocean: return "water.waves"
+        case .land: return "square.fill"
+        case .tropicalForest: return "tree.fill"
+        case .temperateForest: return "leaf.fill"
+        case .desert: return "sun.max.fill"
+        case .mountainRange: return "mountain.2.fill"
+        case .tundra: return "snowflake"
+        case .ice: return "snowflake.circle.fill"
+        case .lake: return "drop.fill"
+        case .river: return "line.diagonal"
+        }
+    }
+
+    /// Whether this terrain is drawn as a path (line/ribbon) vs a region (area stamp)
+    var isLinear: Bool {
+        switch self {
+        case .river, .mountainRange: return true
+        default: return false
+        }
+    }
+
+    /// Default style for this terrain type
+    var defaultStyle: PathStyle {
+        switch self {
+        case .river:
+            return PathStyle(
+                strokeColor: CodableColor(r: 0.25, g: 0.5, b: 0.85, a: 1.0),
+                strokeWidth: 1.5,
+                fillColor: nil
+            )
+        case .mountainRange:
+            return PathStyle(
+                strokeColor: CodableColor(r: 0.55, g: 0.45, b: 0.35, a: 0.9),
+                strokeWidth: 3.0,
+                fillColor: CodableColor(r: 0.55, g: 0.45, b: 0.35, a: 0.4)
+            )
+        default:
+            return PathStyle(
+                strokeColor: defaultColor,
+                strokeWidth: 1.0,
+                fillColor: CodableColor(r: defaultColor.r, g: defaultColor.g, b: defaultColor.b, a: 0.35)
+            )
+        }
+    }
+
+    /// Terrain types available in the terrain drawing palette
+    static var drawableTypes: [TerrainType] {
+        [.river, .mountainRange, .tropicalForest, .temperateForest, .desert, .tundra]
+    }
+
+    // MARK: Backward Compatibility
+
+    /// Custom decoding to support old terrain type names from format 2.0
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+
+        // Map old names to new names
+        switch rawValue {
+        case "forest": self = .temperateForest
+        case "mountain": self = .mountainRange
+        default:
+            guard let value = TerrainType(rawValue: rawValue) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Unknown terrain type: \(rawValue)"
+                )
+            }
+            self = value
         }
     }
 }
@@ -95,7 +190,11 @@ struct VectorPath: Identifiable, Codable, Equatable, Sendable {
     var isClosed: Bool
     var style: PathStyle
     var terrain: TerrainType?
-    
+
+    /// Per-point pressure values from Apple Pencil (0.0–1.0), parallel to linearPoints.
+    /// Used by mountain ranges to control ribbon width.
+    var pressures: [Float]?
+
     enum PathType: String, Codable, Sendable {
         case linear
         case cubic
@@ -116,8 +215,8 @@ struct VectorPath: Identifiable, Codable, Equatable, Sendable {
     }
     
     /// Create a linear path (for hand-drawn strokes)
-    init(id: UUID = UUID(), linearPoints: [Coordinate], isClosed: Bool = false, 
-         style: PathStyle = .default, terrain: TerrainType? = nil) {
+    init(id: UUID = UUID(), linearPoints: [Coordinate], isClosed: Bool = false,
+         style: PathStyle = .default, terrain: TerrainType? = nil, pressures: [Float]? = nil) {
         self.id = id
         self.pathType = .linear
         self.cubicSegments = nil
@@ -125,6 +224,7 @@ struct VectorPath: Identifiable, Codable, Equatable, Sendable {
         self.isClosed = isClosed
         self.style = style
         self.terrain = terrain
+        self.pressures = pressures
     }
     
     // MARK: Tessellation

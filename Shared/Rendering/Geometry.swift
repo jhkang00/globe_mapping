@@ -276,20 +276,19 @@ final class StrokeGeometry: @unchecked Sendable {
         self.device = device
     }
     
-    func update(points: [Coordinate]) {
+    func update(points: [Coordinate], color: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)) {
         guard points.count >= 2 else {
             vertexBuffer = nil
             vertexCount = 0
             return
         }
-        
-        let color = SIMD4<Float>(1.0, 1.0, 1.0, 1.0)
+
         var vertices: [LineVertex] = []
-        
+
         for coord in points {
             vertices.append(LineVertex(position: coord.toCartesian(), color: color))
         }
-        
+
         vertexBuffer = device.makeBuffer(
             bytes: vertices,
             length: vertices.count * MemoryLayout<LineVertex>.stride,
@@ -341,5 +340,171 @@ final class EraserGeometry: @unchecked Sendable {
     func clear() {
         vertexBuffer = nil
         vertexCount = 0
+    }
+}
+
+// MARK: - Ribbon Geometry
+
+/// Variable-width ribbon for mountain ranges, rendered as a triangle strip.
+/// The width at each point is derived from stored pressure values.
+final class RibbonGeometry: @unchecked Sendable {
+    private let device: MTLDevice
+
+    private(set) var vertexBuffer: MTLBuffer?
+    private(set) var vertexCount: Int = 0
+
+    init(device: MTLDevice) {
+        self.device = device
+    }
+
+    func update(paths: [VectorPath]) {
+        // Build each path's strip separately, then stitch with proper degenerate triangles
+        var strips: [[LineVertex]] = []
+
+        for path in paths {
+            let coords = path.tessellate()
+            guard coords.count >= 2 else { continue }
+
+            let pressures = path.pressures ?? Array(repeating: Float(0.5), count: coords.count)
+            let color = path.style.fillColor?.simd ?? path.style.strokeColor.simd
+            let edgeColor = path.style.strokeColor.simd
+
+            var strip: [LineVertex] = []
+
+            for i in 0..<coords.count {
+                let p = i < pressures.count ? pressures[i] : 0.5
+                let halfWidth = Double(0.3 + p * 2.2)
+
+                // Longitude compression factor at this latitude
+                let cosLat = cos(coords[i].lat * .pi / 180.0)
+                let lonScale = max(cosLat, 0.01)
+
+                let prev = i > 0 ? coords[i - 1] : coords[i]
+                let next = i < coords.count - 1 ? coords[i + 1] : coords[i]
+
+                let tangentLat = next.lat - prev.lat
+                let tangentLon = (next.lon - prev.lon) * lonScale
+                let tangentLen = sqrt(tangentLat * tangentLat + tangentLon * tangentLon)
+
+                let normalLat: Double
+                let normalLon: Double
+                if tangentLen > 0.0001 {
+                    let physNormalLat = -tangentLon / tangentLen
+                    let physNormalLon = tangentLat / tangentLen
+                    normalLat = physNormalLat
+                    normalLon = physNormalLon / lonScale
+                } else {
+                    normalLat = 1.0
+                    normalLon = 0.0
+                }
+
+                let leftCoord = Coordinate(
+                    lat: coords[i].lat + normalLat * halfWidth,
+                    lon: coords[i].lon + normalLon * halfWidth
+                )
+                let rightCoord = Coordinate(
+                    lat: coords[i].lat - normalLat * halfWidth,
+                    lon: coords[i].lon - normalLon * halfWidth
+                )
+
+                strip.append(LineVertex(position: leftCoord.toCartesian(), color: edgeColor))
+                strip.append(LineVertex(position: rightCoord.toCartesian(), color: color))
+            }
+
+            if !strip.isEmpty {
+                strips.append(strip)
+            }
+        }
+
+        // Stitch strips with proper degenerate triangles:
+        // Repeat last vertex of current strip + first vertex of next strip
+        var vertices: [LineVertex] = []
+        for (i, strip) in strips.enumerated() {
+            vertices.append(contentsOf: strip)
+            if i < strips.count - 1, let last = strip.last, let nextFirst = strips[i + 1].first {
+                vertices.append(last)
+                vertices.append(nextFirst)
+            }
+        }
+
+        if !vertices.isEmpty {
+            vertexBuffer = device.makeBuffer(
+                bytes: vertices,
+                length: vertices.count * MemoryLayout<LineVertex>.stride,
+                options: .storageModeShared
+            )
+            vertexCount = vertices.count
+        } else {
+            vertexBuffer = nil
+            vertexCount = 0
+        }
+    }
+}
+
+// MARK: - Region Geometry
+
+/// Filled circular region stamps for area terrain types (forest, desert, tundra).
+/// Each path's center point is used to place a translucent disc on the sphere.
+final class RegionGeometry: @unchecked Sendable {
+    private let device: MTLDevice
+
+    private(set) var vertexBuffer: MTLBuffer?
+    private(set) var vertexCount: Int = 0
+
+    init(device: MTLDevice) {
+        self.device = device
+    }
+
+    func update(paths: [VectorPath]) {
+        var vertices: [LineVertex] = []
+
+        for path in paths {
+            var coords = path.tessellate()
+            guard coords.count >= 3 else { continue }
+
+            let color = path.style.fillColor?.simd ?? path.style.strokeColor.simd
+
+            // If the scribble doesn't return close to its start, close it explicitly.
+            // This prevents a long implicit closing edge that creates weird slivers.
+            if let first = coords.first, let last = coords.last {
+                let closingGap = first.distance(to: last)
+                if closingGap > 2.0 {
+                    // Insert midpoint(s) along the closing edge so the fill doesn't
+                    // create one huge triangle spanning the gap
+                    let steps = max(2, Int(closingGap / 2.0))
+                    for s in 1..<steps {
+                        let t = Double(s) / Double(steps)
+                        let midLat = last.lat + (first.lat - last.lat) * t
+                        let midLon = last.lon + (first.lon - last.lon) * t
+                        coords.append(Coordinate(lat: midLat, lon: midLon))
+                    }
+                }
+            }
+
+            // Centroid-based triangle fan
+            let centroidLat = coords.reduce(0.0) { $0 + $1.lat } / Double(coords.count)
+            let centroidLon = coords.reduce(0.0) { $0 + $1.lon } / Double(coords.count)
+            let center = Coordinate(lat: centroidLat, lon: centroidLon)
+            let centerPos = center.toCartesian()
+
+            for i in 0..<coords.count {
+                let next = (i + 1) % coords.count
+                vertices.append(LineVertex(position: centerPos, color: color))
+                vertices.append(LineVertex(position: coords[i].toCartesian(), color: color))
+                vertices.append(LineVertex(position: coords[next].toCartesian(), color: color))
+            }
+        }
+
+        if !vertices.isEmpty {
+            vertexBuffer = device.makeBuffer(
+                bytes: vertices,
+                length: vertices.count * MemoryLayout<LineVertex>.stride,
+                options: .storageModeShared
+            )
+            vertexCount = vertices.count
+        } else {
+            vertexBuffer = nil
+            vertexCount = 0
+        }
     }
 }
