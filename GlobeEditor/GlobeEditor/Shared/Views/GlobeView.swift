@@ -142,10 +142,7 @@ class GlobeMTKView: MTKView {
                 let location = touch.location(in: self)
                 let pressure = Float(touch.force / max(touch.maximumPossibleForce, 0.001))
                 isPencilDrawing = true
-
-                Task { @MainActor in
-                    handleDragBegan(at: location, isPencil: true, pressure: pressure)
-                }
+                handleDragBegan(at: location, isPencil: true, pressure: pressure)
                 return
             }
         }
@@ -163,38 +160,36 @@ class GlobeMTKView: MTKView {
             if touch.type == .pencil {
                 let location = touch.location(in: self)
                 let pressure = Float(touch.force / max(touch.maximumPossibleForce, 0.001))
-
-                Task { @MainActor in
-                    handleDragChanged(to: location, isPencil: true, pressure: pressure)
-                }
+                handleDragChanged(to: location, isPencil: true, pressure: pressure)
                 return
             }
         }
 
         super.touchesMoved(touches, with: event)
     }
-    
+
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard isPencilDrawing else {
             super.touchesEnded(touches, with: event)
             return
         }
-        
-        Task { @MainActor in
-            handleDragEnded(isPencil: true)
-        }
-        
+
+        // Order matters: commit the stroke (handleDragEnded → endStroke) before
+        // clearing the in-flight flag. Previously this was wrapped in a Task,
+        // so isPencilDrawing flipped to false synchronously while the commit
+        // ran on the next runloop turn — a latent ordering bug with no current
+        // observable symptom (nothing reads the flag from inside the commit
+        // path), but a footgun for any future code that does.
+        handleDragEnded(isPencil: true)
         isPencilDrawing = false
     }
-    
+
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         if isPencilDrawing {
-            Task { @MainActor in
-                handleDragEnded(isPencil: true)
-            }
+            handleDragEnded(isPencil: true)
             isPencilDrawing = false
         }
-        
+
         super.touchesCancelled(touches, with: event)
     }
     
