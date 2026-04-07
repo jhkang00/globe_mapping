@@ -77,8 +77,6 @@ class GlobeMTKView: MTKView {
     }
     
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard let viewModel = viewModel else { return }
-        
         let location = gesture.location(in: self)
         
         Task { @MainActor in
@@ -139,7 +137,7 @@ class GlobeMTKView: MTKView {
     // MARK: Touch Handling (for Apple Pencil)
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let viewModel = viewModel else {
+        guard viewModel != nil else {
             super.touchesBegan(touches, with: event)
             return
         }
@@ -161,7 +159,7 @@ class GlobeMTKView: MTKView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let viewModel = viewModel, isPencilDrawing else {
+        guard viewModel != nil, isPencilDrawing else {
             super.touchesMoved(touches, with: event)
             return
         }
