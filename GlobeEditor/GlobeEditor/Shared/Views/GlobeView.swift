@@ -64,73 +64,68 @@ class GlobeMTKView: MTKView {
     
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         guard let viewModel = viewModel else { return }
-        
+
         let location = gesture.location(in: self)
-        
-        Task { @MainActor in
-            if viewModel.toolMode == .select {
-                if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
-                    viewModel.selectPath(at: coord)
-                }
+
+        if viewModel.toolMode == .select {
+            if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
+                viewModel.selectPath(at: coord)
             }
         }
     }
-    
+
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let location = gesture.location(in: self)
-        
-        Task { @MainActor in
-            switch gesture.state {
-            case .began:
-                handleDragBegan(at: location, isPencil: false)
-                
-            case .changed:
-                handleDragChanged(to: location, isPencil: false)
-                
-            case .ended, .cancelled:
-                handleDragEnded(isPencil: false)
-                
-            default:
-                break
-            }
+
+        switch gesture.state {
+        case .began:
+            handleDragBegan(at: location, isPencil: false)
+
+        case .changed:
+            handleDragChanged(to: location, isPencil: false)
+
+        case .ended, .cancelled:
+            handleDragEnded(isPencil: false)
+
+        default:
+            break
         }
     }
-    
+
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         guard let viewModel = viewModel,
               viewModel.toolMode == .navigate || viewModel.toolMode == .select || viewModel.toolMode == .terrain else {
             return
         }
-        
+
         if gesture.state == .changed {
-            Task { @MainActor in
-                let zoomDelta = Float(1.0 - gesture.scale) * 2.0
-                viewModel.renderer?.camera.zoom(delta: zoomDelta)
-            }
+            // Capture before resetting — previously this read happened inside a
+            // Task body that ran after `gesture.scale = 1.0`, which made
+            // `zoomDelta` always 0 and silently broke pinch-to-zoom on iPad.
+            let zoomDelta = Float(1.0 - gesture.scale) * 2.0
             gesture.scale = 1.0
+            viewModel.renderer?.camera.zoom(delta: zoomDelta)
         }
     }
-    
+
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
         guard let viewModel = viewModel else { return }
-        
+
         let location = gesture.location(in: self)
-        
-        Task { @MainActor in
-            switch gesture.state {
-            case .began, .changed:
-                if viewModel.toolMode == .erase {
-                    if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
-                        viewModel.updateEraserPosition(coord)
-                    }
+
+        switch gesture.state {
+        case .began, .changed:
+            if viewModel.toolMode == .erase {
+                if let coord = viewModel.renderer?.hitTest(screenPoint: location, viewSize: bounds.size) {
+                    viewModel.updateEraserPosition(coord)
                 }
-                
-            case .ended, .cancelled:
-                viewModel.updateEraserPosition(nil)
-                
-            default:
-                break
             }
+
+        case .ended, .cancelled:
+            viewModel.updateEraserPosition(nil)
+
+        default:
+            break
         }
     }
     
