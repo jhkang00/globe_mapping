@@ -311,11 +311,7 @@ struct GlobeView: NSViewRepresentable {
     func makeNSView(context: Context) -> GlobeMTKView {
         let mtkView = GlobeMTKView(frame: .zero)
         mtkView.viewModel = viewModel
-        
-        Task { @MainActor in
-            viewModel.setupRenderer(mtkView: mtkView)
-        }
-        
+        viewModel.setupRenderer(mtkView: mtkView)
         return mtkView
     }
     
@@ -333,47 +329,38 @@ class GlobeMTKView: MTKView {
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         let flipped = CGPoint(x: location.x, y: bounds.height - location.y)
-        
-        Task { @MainActor in
-            handleDragBegan(at: flipped)
-        }
+        handleDragBegan(at: flipped)
     }
-    
+
     override func mouseDragged(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         let flipped = CGPoint(x: location.x, y: bounds.height - location.y)
-        
-        Task { @MainActor in
-            handleDragChanged(to: flipped)
-        }
+        handleDragChanged(to: flipped)
     }
-    
+
     override func mouseUp(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         let flipped = CGPoint(x: location.x, y: bounds.height - location.y)
-        
-        Task { @MainActor in
-            // Check for click (selection)
-            if let viewModel = viewModel, viewModel.toolMode == .select && !isDragging {
-                if let coord = viewModel.renderer?.hitTest(screenPoint: flipped, viewSize: bounds.size) {
-                    viewModel.selectPath(at: coord)
-                }
+
+        // Check for click (selection) — must happen before handleDragEnded
+        // resets isDragging.
+        if let viewModel = viewModel, viewModel.toolMode == .select && !isDragging {
+            if let coord = viewModel.renderer?.hitTest(screenPoint: flipped, viewSize: bounds.size) {
+                viewModel.selectPath(at: coord)
             }
-            
-            handleDragEnded()
         }
+
+        handleDragEnded()
     }
-    
+
     override func scrollWheel(with event: NSEvent) {
         guard let viewModel = viewModel,
               viewModel.toolMode == .navigate || viewModel.toolMode == .select else {
             return
         }
-        
-        Task { @MainActor in
-            let zoomDelta = Float(event.deltaY) * 0.1
-            viewModel.renderer?.camera.zoom(delta: zoomDelta)
-        }
+
+        let zoomDelta = Float(event.deltaY) * 0.1
+        viewModel.renderer?.camera.zoom(delta: zoomDelta)
     }
     
     override func keyDown(with event: NSEvent) {
