@@ -64,14 +64,7 @@ fragment float4 sphereFragment(
     rim = pow(rim, 2.5) * 0.3;
     float3 rimColor = float3(0.3, 0.4, 0.6);
     
-    // Subtle grid pattern
-    float lat = asin(in.worldNormal.z) * 57.2958;  // to degrees
-    float lon = atan2(in.worldNormal.y, in.worldNormal.x) * 57.2958;
-    float gridLat = smoothstep(0.4, 0.5, abs(fract(lat / 10.0) - 0.5) * 2.0);
-    float gridLon = smoothstep(0.4, 0.5, abs(fract(lon / 10.0) - 0.5) * 2.0);
-    float grid = min(gridLat, gridLon) * 0.05;
-    
-    float3 finalColor = baseColor * diffuse + rimColor * rim + grid;
+    float3 finalColor = baseColor * diffuse + rimColor * rim;
     
     return float4(finalColor, 1.0);
 }
